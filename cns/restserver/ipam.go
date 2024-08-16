@@ -138,7 +138,7 @@ func (service *HTTPRestService) requestIPConfigHandlerHelperStandalone(ctx conte
 		return &cns.IPConfigsResponse{
 			Response: cns.Response{
 				ReturnCode: types.FailedToAllocateIPConfig,
-				Message:    fmt.Sprintf("AllocateIPConfig failed due to not getting NC Response from statefile, IP config request is %v", ipconfigsRequest),
+				Message:    fmt.Sprintf("AllocateIPConfig failed due to not getting NC Response from statefile, IP config request is %+v", ipconfigsRequest),
 			},
 		}, ErrGetAllNCResponseEmpty
 	}
@@ -166,7 +166,7 @@ func (service *HTTPRestService) requestIPConfigHandlerHelperStandalone(ctx conte
 		return &cns.IPConfigsResponse{
 			Response: cns.Response{
 				ReturnCode: types.FailedToAllocateIPConfig,
-				Message:    fmt.Sprintf("AllocateIPConfig failed while updating pod with interfaces: %v, IP config request is %v", err, ipconfigsRequest),
+				Message:    fmt.Sprintf("AllocateIPConfig failed while updating pod with interfaces: %v, IP config request is %+v", err, ipconfigsRequest),
 			},
 		}, err
 	}
