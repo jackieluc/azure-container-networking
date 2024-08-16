@@ -15,9 +15,11 @@ import (
 	"github.com/Azure/azure-container-networking/cns/middlewares"
 	"github.com/Azure/azure-container-networking/cns/middlewares/mock"
 	"github.com/Azure/azure-container-networking/cns/types"
+	nma "github.com/Azure/azure-container-networking/nmagent"
 	"github.com/Azure/azure-container-networking/store"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -1892,4 +1894,227 @@ func TestIPAMGetK8sInfinibandFailure(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Expected failing requesting IPs due to not able to set routes")
 	}
+}
+
+func TestIPAMGetStandaloneSWIFTv2(t *testing.T) {
+	svc := getTestService(cns.ServiceFabric)
+	middleware := middlewares.StandaloneSWIFTv2Middleware{}
+	svc.AttachIPConfigsHandlerMiddleware(&middleware)
+
+	orchestratorContext, _ := testPod1Info.OrchestratorContext()
+	mockMACAddress := "00:00:00:00:00:00"
+	mockGatewayIP := "10.0.0.1" // from mock wireserver gateway calculation on host subnet
+
+	tt := []struct {
+		name             string
+		req              cns.IPConfigsRequest
+		mockNMAgent      *fakes.NMAgentClientFake
+		expectedResponse *cns.IPConfigsResponse
+	}{
+		{
+			name: "Successful single IPAM for Standalone SwiftV2 pod, when NMAgent returns error for GetNCVersionList",
+			req: cns.IPConfigsRequest{
+				DesiredIPAddresses:  []string{testIP1},
+				OrchestratorContext: orchestratorContext,
+				PodInterfaceID:      testPod1Info.InterfaceID(),
+				InfraContainerID:    testPod1Info.InfraContainerID(),
+			},
+			mockNMAgent: &fakes.NMAgentClientFake{
+				GetNCVersionListF: func(_ context.Context) (nma.NCVersionList, error) {
+					return nma.NCVersionList{
+						Containers: []nma.NCVersion{},
+					}, errors.New("error")
+				},
+			},
+			expectedResponse: &cns.IPConfigsResponse{
+				Response: cns.Response{
+					ReturnCode: types.Success,
+				},
+				PodIPInfo: []cns.PodIpInfo{
+					{
+						PodIPConfig: cns.IPSubnet{
+							IPAddress: testIP1,
+						},
+						NetworkContainerPrimaryIPConfig: cns.IPConfiguration{
+							IPSubnet: cns.IPSubnet{
+								IPAddress: testIP1,
+							},
+							GatewayIPAddress: mockGatewayIP,
+						},
+						MacAddress: mockMACAddress,
+						NICType:    cns.DelegatedVMNIC,
+						HostPrimaryIPInfo: cns.HostIPInfo{
+							Gateway:   mockGatewayIP,
+							PrimaryIP: fakes.HostPrimaryIP,
+							Subnet:    fakes.HostSubnet,
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Successful single IPAM for Standalone SwiftV2 pod, when NMAgent returns empty response and no error for GetNCVersionList",
+			req: cns.IPConfigsRequest{
+				DesiredIPAddresses:  []string{testIP1},
+				OrchestratorContext: orchestratorContext,
+				PodInterfaceID:      testPod1Info.InterfaceID(),
+				InfraContainerID:    testPod1Info.InfraContainerID(),
+			},
+			mockNMAgent: &fakes.NMAgentClientFake{
+				GetNCVersionListF: func(_ context.Context) (nma.NCVersionList, error) {
+					return nma.NCVersionList{
+						Containers: []nma.NCVersion{},
+					}, nil
+				},
+			},
+			expectedResponse: &cns.IPConfigsResponse{
+				Response: cns.Response{
+					ReturnCode: types.Success,
+				},
+				PodIPInfo: []cns.PodIpInfo{
+					{
+						PodIPConfig: cns.IPSubnet{
+							IPAddress: testIP1,
+						},
+						NetworkContainerPrimaryIPConfig: cns.IPConfiguration{
+							IPSubnet: cns.IPSubnet{
+								IPAddress: testIP1,
+							},
+							GatewayIPAddress: mockGatewayIP,
+						},
+						MacAddress: mockMACAddress,
+						NICType:    cns.DelegatedVMNIC,
+						HostPrimaryIPInfo: cns.HostIPInfo{
+							Gateway:   mockGatewayIP,
+							PrimaryIP: fakes.HostPrimaryIP,
+							Subnet:    fakes.HostSubnet,
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Successful single IPAM for Standalone SwiftV2 pod, when NMAgent returns an NC for GetNCVersionList even if it's not programmed",
+			req: cns.IPConfigsRequest{
+				DesiredIPAddresses:  []string{testIP1},
+				OrchestratorContext: orchestratorContext,
+				PodInterfaceID:      testPod1Info.InterfaceID(),
+				InfraContainerID:    testPod1Info.InfraContainerID(),
+			},
+			mockNMAgent: &fakes.NMAgentClientFake{
+				GetNCVersionListF: func(_ context.Context) (nma.NCVersionList, error) {
+					return nma.NCVersionList{
+						Containers: []nma.NCVersion{
+							{
+								NetworkContainerID: testNCID,
+								Version:            "0",
+							},
+						},
+					}, nil
+				},
+			},
+			expectedResponse: &cns.IPConfigsResponse{
+				Response: cns.Response{
+					ReturnCode: types.Success,
+				},
+				PodIPInfo: []cns.PodIpInfo{
+					{
+						PodIPConfig: cns.IPSubnet{
+							IPAddress: testIP1,
+						},
+						NetworkContainerPrimaryIPConfig: cns.IPConfiguration{
+							IPSubnet: cns.IPSubnet{
+								IPAddress: testIP1,
+							},
+							GatewayIPAddress: mockGatewayIP,
+						},
+						MacAddress: mockMACAddress,
+						NICType:    cns.DelegatedVMNIC,
+						HostPrimaryIPInfo: cns.HostIPInfo{
+							Gateway:   mockGatewayIP,
+							PrimaryIP: fakes.HostPrimaryIP,
+							Subnet:    fakes.HostSubnet,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			// setup CNS state with SwiftV2 NC
+			createAndSaveMockNCRequest(t, svc, testNCID, orchestratorContext, tc.req.DesiredIPAddresses[0], mockGatewayIP, mockMACAddress)
+
+			// IMPORTANT: although SwiftV2 reuses the concept of NCs, NMAgent doesn't program NCs for SwiftV2, but
+			// instead programs NICs. When getting SwiftV2 NCs, we want the NIC type and MAC address of the NCs.
+			// TODO: we need another way to verify and sync NMAgent's NIC programming status. currently pending a new NMAgent API or NIC programming status to be passed in the SwiftV2 create NC request.
+			setupMockNMAgent(t, svc, tc.mockNMAgent)
+
+			// invoke the SwiftV2 IPAM wrapper handler with the standalone SwiftV2 middleware
+			wrappedHandler := svc.IPConfigsHandlerMiddleware.IPConfigsRequestHandlerWrapper(svc.requestIPConfigHandlerHelperStandalone, nil)
+			resp, err := wrappedHandler(context.TODO(), tc.req)
+			require.NoError(t, err)
+
+			// assert CNS response code
+			require.Equal(t, tc.expectedResponse.Response.ReturnCode, resp.Response.ReturnCode)
+
+			expectedPodIPInfo := tc.expectedResponse.PodIPInfo
+			actualPodIPInfo := resp.PodIPInfo
+
+			for i, expected := range expectedPodIPInfo {
+
+				// assert SwiftV2 IP is returned
+				assert.Len(t, actualPodIPInfo, len(tc.req.DesiredIPAddresses), "Expected list of IPs returned matches the number of desired IPs from CNI IPAM request")
+				assert.Equal(t, expected.PodIPConfig.IPAddress, actualPodIPInfo[i].PodIPConfig.IPAddress)
+				assert.Equal(t, expected.MacAddress, actualPodIPInfo[i].MacAddress)
+				assert.Equal(t, expected.NICType, actualPodIPInfo[i].NICType)
+
+				// assert that PodIPInfo contains HostIPInfo
+				assert.Equal(t, expected.HostPrimaryIPInfo.Gateway, actualPodIPInfo[i].HostPrimaryIPInfo.Gateway)
+				assert.Equal(t, expected.HostPrimaryIPInfo.PrimaryIP, actualPodIPInfo[i].HostPrimaryIPInfo.PrimaryIP)
+				assert.Equal(t, expected.HostPrimaryIPInfo.Subnet, actualPodIPInfo[i].HostPrimaryIPInfo.Subnet)
+			}
+
+		})
+	}
+}
+
+func setupMockNMAgent(t *testing.T, svc *HTTPRestService, mockNMAgent *fakes.NMAgentClientFake) {
+	t.Helper()
+	t.Log("Started mock NMAgent")
+	cleanupNMAgentMock := setMockNMAgent(svc, mockNMAgent)
+	t.Cleanup(func() {
+		cleanupNMAgentMock()
+		t.Log("Stopped mock NMAgent")
+	})
+}
+
+func createAndSaveMockNCRequest(t *testing.T, svc *HTTPRestService, ncID string, orchestratorContext json.RawMessage, desiredIP, mockGatewayIP, mockMACAddress string) {
+	t.Helper()
+
+	createNCReq := &cns.CreateNetworkContainerRequest{
+		NetworkContainerType: "Docker",
+		NetworkContainerid:   ncID,
+		OrchestratorContext:  orchestratorContext,
+		IPConfiguration: cns.IPConfiguration{
+			IPSubnet: cns.IPSubnet{
+				IPAddress:    desiredIP,
+				PrefixLength: ipPrefixBitsv4,
+			},
+			GatewayIPAddress: mockGatewayIP,
+		},
+		// SwiftV2 NIC info
+		NetworkInterfaceInfo: cns.NetworkInterfaceInfo{
+			NICType:    cns.DelegatedVMNIC,
+			MACAddress: mockMACAddress,
+		},
+	}
+	err := createNCReq.Validate()
+	require.NoError(t, err)
+
+	// save SwiftV2 NC state in CNS
+	returnCode, returnMessage := svc.saveNetworkContainerGoalState(*createNCReq)
+	require.Equal(t, types.Success, returnCode)
+	require.Empty(t, returnMessage)
 }
