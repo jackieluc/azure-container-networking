@@ -2,6 +2,7 @@ package restserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/netip"
@@ -2042,6 +2043,34 @@ func TestIPAMGetStandaloneSWIFTv2(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Fail validation when orchestrator context can't be unmarshalled",
+			req: cns.IPConfigsRequest{
+				DesiredIPAddresses:  []string{testIP1},
+				OrchestratorContext: json.RawMessage("invalid"),
+				PodInterfaceID:      testPod1Info.InterfaceID(),
+				InfraContainerID:    testPod1Info.InfraContainerID(),
+			},
+			expectedResponse: &cns.IPConfigsResponse{
+				Response: cns.Response{
+					ReturnCode: types.UnsupportedOrchestratorContext,
+				},
+			},
+		},
+		{
+			name: "Fail validation when orchestrator context is nil",
+			req: cns.IPConfigsRequest{
+				DesiredIPAddresses:  []string{testIP1},
+				OrchestratorContext: nil,
+				PodInterfaceID:      testPod1Info.InterfaceID(),
+				InfraContainerID:    testPod1Info.InfraContainerID(),
+			},
+			expectedResponse: &cns.IPConfigsResponse{
+				Response: cns.Response{
+					ReturnCode: types.EmptyOrchestratorContext,
+				},
+			},
+		},
 	}
 
 	for _, tc := range tt {
@@ -2057,23 +2086,32 @@ func TestIPAMGetStandaloneSWIFTv2(t *testing.T) {
 			// invoke the SwiftV2 IPAM wrapper handler with the standalone SwiftV2 middleware
 			wrappedHandler := svc.IPConfigsHandlerMiddleware.IPConfigsRequestHandlerWrapper(svc.requestIPConfigHandlerHelperStandalone, nil)
 			resp, err := wrappedHandler(context.TODO(), tc.req)
-			require.NoError(t, err)
 
-			// assert CNS response code
-			require.Equal(t, tc.expectedResponse.Response.ReturnCode, resp.Response.ReturnCode)
+			if tc.expectedResponse.Response.ReturnCode == types.Success {
+				require.NoError(t, err)
 
-			expectedPodIPInfo := tc.expectedResponse.PodIPInfo
-			actualPodIPInfo := resp.PodIPInfo
+				// assert CNS response code
+				require.Equal(t, tc.expectedResponse.Response.ReturnCode, resp.Response.ReturnCode)
 
-			for i, expected := range expectedPodIPInfo {
+				expectedPodIPInfo := tc.expectedResponse.PodIPInfo
+				actualPodIPInfo := resp.PodIPInfo
 
-				// assert SwiftV2 IP is returned
-				assert.Len(t, actualPodIPInfo, len(tc.req.DesiredIPAddresses), "Expected list of IPs returned matches the number of desired IPs from CNI IPAM request")
-				assert.Equal(t, expected.PodIPConfig.IPAddress, actualPodIPInfo[i].PodIPConfig.IPAddress)
-				assert.Equal(t, expected.MacAddress, actualPodIPInfo[i].MacAddress)
-				assert.Equal(t, expected.NICType, actualPodIPInfo[i].NICType)
+				for i, expected := range expectedPodIPInfo {
+					// assert SwiftV2 IP is returned
+					assert.Len(t, actualPodIPInfo, len(tc.req.DesiredIPAddresses), "Expected list of IPs returned matches the number of desired IPs from CNI IPAM request")
+					assert.Equal(t, expected.PodIPConfig.IPAddress, actualPodIPInfo[i].PodIPConfig.IPAddress)
+					assert.Equal(t, expected.MacAddress, actualPodIPInfo[i].MacAddress)
+					assert.Equal(t, expected.NICType, actualPodIPInfo[i].NICType)
 
 					// assert that PodIPInfo contains interface information
+					assert.Equal(t, expected.HostPrimaryIPInfo.Gateway, actualPodIPInfo[i].HostPrimaryIPInfo.Gateway)
+					assert.Equal(t, expected.HostPrimaryIPInfo.PrimaryIP, actualPodIPInfo[i].HostPrimaryIPInfo.PrimaryIP)
+					assert.Equal(t, expected.HostPrimaryIPInfo.Subnet, actualPodIPInfo[i].HostPrimaryIPInfo.Subnet)
+				}
+			} else {
+				require.Error(t, err)
+				assert.Equal(t, tc.expectedResponse.Response.ReturnCode, resp.Response.ReturnCode)
+			}
 		})
 	}
 }
