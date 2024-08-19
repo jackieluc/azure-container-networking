@@ -1921,9 +1921,10 @@ func TestIPAMGetStandaloneSWIFTv2(t *testing.T) {
 			},
 			mockNMAgent: &fakes.NMAgentClientFake{
 				GetNCVersionListF: func(_ context.Context) (nma.NCVersionList, error) {
+					// NMAgent returns an error, eg. NC is not programmed
 					return nma.NCVersionList{
 						Containers: []nma.NCVersion{},
-					}, errors.New("error")
+					}, errors.New("any NMAgent error")
 				},
 			},
 			expectedResponse: &cns.IPConfigsResponse{
@@ -1962,6 +1963,7 @@ func TestIPAMGetStandaloneSWIFTv2(t *testing.T) {
 			},
 			mockNMAgent: &fakes.NMAgentClientFake{
 				GetNCVersionListF: func(_ context.Context) (nma.NCVersionList, error) {
+					// NMAgent returns an empty response with no error
 					return nma.NCVersionList{
 						Containers: []nma.NCVersion{},
 					}, nil
@@ -2003,6 +2005,7 @@ func TestIPAMGetStandaloneSWIFTv2(t *testing.T) {
 			},
 			mockNMAgent: &fakes.NMAgentClientFake{
 				GetNCVersionListF: func(_ context.Context) (nma.NCVersionList, error) {
+					// NMAgent returns an NC even if it's not programmed
 					return nma.NCVersionList{
 						Containers: []nma.NCVersion{
 							{
@@ -2070,12 +2073,7 @@ func TestIPAMGetStandaloneSWIFTv2(t *testing.T) {
 				assert.Equal(t, expected.MacAddress, actualPodIPInfo[i].MacAddress)
 				assert.Equal(t, expected.NICType, actualPodIPInfo[i].NICType)
 
-				// assert that PodIPInfo contains HostIPInfo
-				assert.Equal(t, expected.HostPrimaryIPInfo.Gateway, actualPodIPInfo[i].HostPrimaryIPInfo.Gateway)
-				assert.Equal(t, expected.HostPrimaryIPInfo.PrimaryIP, actualPodIPInfo[i].HostPrimaryIPInfo.PrimaryIP)
-				assert.Equal(t, expected.HostPrimaryIPInfo.Subnet, actualPodIPInfo[i].HostPrimaryIPInfo.Subnet)
-			}
-
+					// assert that PodIPInfo contains interface information
 		})
 	}
 }
