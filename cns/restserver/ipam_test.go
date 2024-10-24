@@ -2094,9 +2094,8 @@ func TestIPAMGetStandaloneSWIFTv2(t *testing.T) {
 			if tc.expectedResponse.Response.ReturnCode == types.Success {
 				require.NoError(t, err)
 
-				// since stateless CNI is configured for the svc, assert endpoint state is being managed in endpoint state store
-				_, ok := svc.EndpointState[tc.req.InfraContainerID]
-				require.True(t, ok)
+				// since Stateless CNI is enabled, require it to work with Standalone SwiftV2
+				requireStatelessCNISuccess(t, svc, tc.req.InfraContainerID)
 
 				// assert CNS response code
 				require.Equal(t, tc.expectedResponse.Response.ReturnCode, resp.Response.ReturnCode)
@@ -2161,4 +2160,18 @@ func createAndSaveMockNCRequest(t *testing.T, svc *HTTPRestService, ncID string,
 	returnCode, returnMessage := svc.saveNetworkContainerGoalState(*createNCReq)
 	require.Equal(t, types.Success, returnCode)
 	require.Empty(t, returnMessage)
+}
+
+// requireStatelessCNISuccess asserts that the stateless CNI is working with Standalone SwiftV2
+// by checking that the endpoint info is persisted in the state store
+func requireStatelessCNISuccess(t *testing.T, svc *HTTPRestService, infraContainerID string) {
+	t.Helper()
+
+	// assert endpoint info exists in memory
+	_, ok := svc.EndpointState[infraContainerID]
+	require.True(t, ok)
+
+	// assert that the endpoint state is persisted in state store
+	err := svc.EndpointStateStore.Read(EndpointStoreKey, &svc.EndpointState)
+	require.NoError(t, err)
 }
