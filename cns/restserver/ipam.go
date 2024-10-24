@@ -175,6 +175,21 @@ func (service *HTTPRestService) requestIPConfigHandlerHelperStandalone(ctx conte
 			},
 		}, err
 	}
+
+	// Check if http rest service managed endpoint state is set
+	if service.Options[common.OptManageEndpointState] == true {
+		err = service.updateEndpointState(ipconfigsRequest, podInfo, podIPInfoList)
+		if err != nil {
+			return &cns.IPConfigsResponse{
+				Response: cns.Response{
+					ReturnCode: types.UnexpectedError,
+					Message:    fmt.Sprintf("Update endpoint state failed: %v ", err),
+				},
+				PodIPInfo: podIPInfoList,
+			}, err
+		}
+	}
+
 	return ipConfigsResp, nil
 }
 

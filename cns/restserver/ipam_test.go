@@ -16,6 +16,7 @@ import (
 	"github.com/Azure/azure-container-networking/cns/middlewares"
 	"github.com/Azure/azure-container-networking/cns/middlewares/mock"
 	"github.com/Azure/azure-container-networking/cns/types"
+	acn "github.com/Azure/azure-container-networking/common"
 	nma "github.com/Azure/azure-container-networking/nmagent"
 	"github.com/Azure/azure-container-networking/store"
 	"github.com/pkg/errors"
@@ -1902,6 +1903,9 @@ func TestIPAMGetStandaloneSWIFTv2(t *testing.T) {
 	middleware := middlewares.StandaloneSWIFTv2Middleware{}
 	svc.AttachIPConfigsHandlerMiddleware(&middleware)
 
+	// stateless CNI
+	svc.SetOption(acn.OptManageEndpointState, true)
+
 	orchestratorContext, _ := testPod1Info.OrchestratorContext()
 	mockMACAddress := "00:00:00:00:00:00"
 	mockGatewayIP := "10.0.0.1" // from mock wireserver gateway calculation on host subnet
@@ -2089,6 +2093,10 @@ func TestIPAMGetStandaloneSWIFTv2(t *testing.T) {
 
 			if tc.expectedResponse.Response.ReturnCode == types.Success {
 				require.NoError(t, err)
+
+				// since stateless CNI is configured for the svc, assert endpoint state is being managed in endpoint state store
+				_, ok := svc.EndpointState[tc.req.InfraContainerID]
+				require.True(t, ok)
 
 				// assert CNS response code
 				require.Equal(t, tc.expectedResponse.Response.ReturnCode, resp.Response.ReturnCode)
