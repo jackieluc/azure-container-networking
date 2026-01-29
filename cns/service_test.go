@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	acn "github.com/Azure/azure-container-networking/common"
 	serverTLS "github.com/Azure/azure-container-networking/server/tls"
 	"github.com/Azure/azure-container-networking/store"
+	"github.com/billgraziano/dpapi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -318,9 +320,19 @@ func createTestCertificate(t *testing.T) string {
 
 	pemCert = append(pemCert, pemKey...)
 
+	var fileContent []byte
+	if runtime.GOOS == "windows" {
+		// On Windows, the TLS certificate retriever expects DPAPI-encrypted content
+		encrypted, err := dpapi.Encrypt(string(pemCert))
+		require.NoError(t, err)
+		fileContent = []byte(encrypted)
+	} else {
+		fileContent = pemCert
+	}
+
 	// Write PEM cert and key to a file in a temp dir
 	testCertFilePath := filepath.Join(t.TempDir(), "dummy.pem")
-	err = os.WriteFile(testCertFilePath, pemCert, 0o600)
+	err = os.WriteFile(testCertFilePath, fileContent, 0o600)
 	require.NoError(t, err)
 
 	t.Log("Created test certificate file at: ", testCertFilePath)
