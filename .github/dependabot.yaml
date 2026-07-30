@@ -9,6 +9,10 @@ updates:
       prefix: "ci"
     labels: ["ci", "dependencies"]
     open-pull-requests-limit: 10
+    groups:
+      all-docker-dependencies:
+        applies-to: version-updates
+        patterns: ["*"]
     cooldown:
       default-days: 7
 
@@ -20,6 +24,10 @@ updates:
       prefix: "ci"
     labels: ["ci", "dependencies"]
     open-pull-requests-limit: 10
+    groups:
+      all-github-actions:
+        applies-to: version-updates
+        patterns: ["*"]
     cooldown:
       default-days: 7
 
@@ -36,9 +44,13 @@ updates:
       time: "12:00"  # UTC
     commit-message:
       prefix: "deps"
-    labels: ["dependencies", "grouped"]
+    labels: ["dependencies"]
     open-pull-requests-limit: 2
     groups:
+      kubernetes-minor-and-patch:
+        applies-to: version-updates
+        patterns: ["k8s.io/*"]
+        update-types: ["minor", "patch"]
       all-go-minor-and-patch:
         applies-to: version-updates
         patterns: ["*"]
@@ -68,9 +80,13 @@ updates:
       time: "12:00"  # UTC
     commit-message:
       prefix: "deps"
-    labels: ["dependencies", "azure-ipam", "grouped"]
+    labels: ["dependencies", "azure-ipam"]
     open-pull-requests-limit: 2
     groups:
+      kubernetes-minor-and-patch:
+        applies-to: version-updates
+        patterns: ["k8s.io/*"]
+        update-types: ["minor", "patch"]
       all-go-minor-and-patch:
         applies-to: version-updates
         patterns: ["*"]
@@ -100,7 +116,7 @@ updates:
       time: "12:00"  # UTC
     commit-message:
       prefix: "deps"
-    labels: ["dependencies", "dropgz", "grouped"]
+    labels: ["dependencies", "dropgz"]
     open-pull-requests-limit: 2
     groups:
       all-go-minor-and-patch:
@@ -119,7 +135,7 @@ updates:
       time: "12:00"  # UTC
     commit-message:
       prefix: "deps"
-    labels: ["dependencies", "grouped"]
+    labels: ["dependencies"]
     open-pull-requests-limit: 2
     groups:
       all-go-minor-and-patch:
@@ -144,6 +160,10 @@ updates:
     open-pull-requests-limit: 1
     target-branch: "release/v1.7"
     groups:
+      kubernetes-minor-and-patch:
+        applies-to: version-updates
+        patterns: ["k8s.io/*"]
+        update-types: ["minor", "patch"]
       all-go-minor-and-patch:
         applies-to: version-updates
         patterns: ["*"]
@@ -174,6 +194,10 @@ updates:
     open-pull-requests-limit: 1
     target-branch: "release/v1.7"
     groups:
+      kubernetes-minor-and-patch:
+        applies-to: version-updates
+        patterns: ["k8s.io/*"]
+        update-types: ["minor", "patch"]
       all-go-minor-and-patch:
         applies-to: version-updates
         patterns: ["*"]
@@ -205,6 +229,10 @@ updates:
     open-pull-requests-limit: 1
     target-branch: "release/v1.6"
     groups:
+      kubernetes-minor-and-patch:
+        applies-to: version-updates
+        patterns: ["k8s.io/*"]
+        update-types: ["minor", "patch"]
       all-go-minor-and-patch:
         applies-to: version-updates
         patterns: ["*"]
@@ -235,6 +263,10 @@ updates:
     open-pull-requests-limit: 1
     target-branch: "release/v1.6"
     groups:
+      kubernetes-minor-and-patch:
+        applies-to: version-updates
+        patterns: ["k8s.io/*"]
+        update-types: ["minor", "patch"]
       all-go-minor-and-patch:
         applies-to: version-updates
         patterns: ["*"]
@@ -252,66 +284,5 @@ updates:
         versions: [">=0.32.0"]
       - dependency-name: "k8s.io/kubectl"
         versions: [">=0.32.0"]
-    cooldown:
-      default-days: 7
-
-  # release/v1.5 constraints (daily)
-  - package-ecosystem: "gomod"
-    directory: "/"
-    schedule:
-      interval: "daily"
-    commit-message:
-      prefix: "deps"
-    labels: ["dependencies", "release/1.5"]
-    open-pull-requests-limit: 1
-    target-branch: "release/v1.5"
-    groups:
-      all-go-minor-and-patch:
-        applies-to: version-updates
-        patterns: ["*"]
-        update-types: ["minor", "patch"]
-    ignore:
-      - dependency-name: "k8s.io/api"
-        versions: [">=0.30.0"]
-      - dependency-name: "k8s.io/apiextensions-apiserver"
-        versions: [">=0.30.0"]
-      - dependency-name: "k8s.io/apimachinery"
-        versions: [">=0.30.0"]
-      - dependency-name: "k8s.io/client-go"
-        versions: [">=0.30.0"]
-      - dependency-name: "k8s.io/kubelet"
-        versions: [">=0.30.0"]
-      - dependency-name: "k8s.io/kubectl"
-        versions: [">=0.30.0"]
-    cooldown:
-      default-days: 7
-
-  - package-ecosystem: "gomod"
-    directory: "/azure-ipam"
-    schedule:
-      interval: "daily"
-    commit-message:
-      prefix: "deps"
-    labels: ["dependencies", "azure-ipam", "release/1.5"]
-    open-pull-requests-limit: 10
-    target-branch: "release/v1.5"
-    groups:
-      all-go-minor-and-patch:
-        applies-to: version-updates
-        patterns: ["*"]
-        update-types: ["minor", "patch"]
-    ignore:
-      - dependency-name: "k8s.io/api"
-        versions: [">=0.30.0"]
-      - dependency-name: "k8s.io/apiextensions-apiserver"
-        versions: [">=0.30.0"]
-      - dependency-name: "k8s.io/apimachinery"
-        versions: [">=0.30.0"]
-      - dependency-name: "k8s.io/client-go"
-        versions: [">=0.30.0"]
-      - dependency-name: "k8s.io/kubelet"
-        versions: [">=0.30.0"]
-      - dependency-name: "k8s.io/kubectl"
-        versions: [">=0.30.0"]
     cooldown:
       default-days: 7
