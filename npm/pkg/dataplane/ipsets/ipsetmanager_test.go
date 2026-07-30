@@ -76,6 +76,109 @@ var (
 	nestedPodLabelList = NewIPSetMetadata("test-nested-pod-label-list", NestedLabelOfPod)
 )
 
+// TestAddReferenceCIDRSingleOwner checks a CIDR set is bound to one netpol: the owner
+// (and re-applies) are accepted, a different netpol is rejected.
+func TestAddReferenceCIDRSingleOwner(t *testing.T) {
+	metrics.ReinitializeAll()
+	iMgr := NewIPSetManager(applyAlwaysCfg, common.NewMockIOShim(nil))
+	cidrSet := NewIPSetMetadata("a-in-ns-b:in-ns:c-0-0IN", CIDRBlocks)
+
+	require.NoError(t, iMgr.AddReference(cidrSet, "c/a-in-ns-b", NetPolType)) // owner
+	require.NoError(t, iMgr.AddReference(cidrSet, "c/a-in-ns-b", NetPolType)) // owner re-apply
+	require.Error(t, iMgr.AddReference(cidrSet, "b-in-ns-c/a", NetPolType))   // different netpol
+}
+
+// TestAddReferenceCIDROwnerReleasedOnDelete checks that once the sole owner deletes its
+// reference, a different netpol may take ownership (the guard uses live ownership).
+func TestAddReferenceCIDROwnerReleasedOnDelete(t *testing.T) {
+	metrics.ReinitializeAll()
+	iMgr := NewIPSetManager(applyAlwaysCfg, common.NewMockIOShim(nil))
+	cidrSet := NewIPSetMetadata("a-in-ns-b:in-ns:c-0-0IN", CIDRBlocks)
+
+	require.NoError(t, iMgr.AddReference(cidrSet, "c/a-in-ns-b", NetPolType)) // first owner
+	require.Error(t, iMgr.AddReference(cidrSet, "b-in-ns-c/a", NetPolType))   // rejected while owned
+	require.NoError(t, iMgr.DeleteReference(cidrSet.GetPrefixName(), "c/a-in-ns-b", NetPolType))
+	require.NoError(t, iMgr.AddReference(cidrSet, "b-in-ns-c/a", NetPolType)) // now accepted
+}
+
+// TestCIDRSetsDoNotMergeInManager applies two policies with similar names to a single
+// IPSetManager and asserts the two CIDR sets stay distinct, each holding only its own
+// members and owned only by its own netpol.
+func TestCIDRSetsDoNotMergeInManager(t *testing.T) {
+	metrics.ReinitializeAll()
+	iMgr := NewIPSetManager(applyAlwaysCfg, common.NewMockIOShim(nil))
+
+	// Post-fix names for policy c/a-in-ns-b and policy b-in-ns-c/a (would share a name pre-fix).
+	first := NewIPSetMetadata("a-in-ns-b:in-ns:c-0-0IN", CIDRBlocks)
+	second := NewIPSetMetadata("a:in-ns:b-in-ns-c-0-0IN", CIDRBlocks)
+	require.NotEqual(t, first.GetHashedName(), second.GetHashedName())
+
+	require.NoError(t, iMgr.AddToSets([]*IPSetMetadata{first}, "198.51.100.10", "c/a-in-ns-b"))
+	require.NoError(t, iMgr.AddReference(first, "c/a-in-ns-b", NetPolType))
+	require.NoError(t, iMgr.AddToSets([]*IPSetMetadata{second}, "0.0.0.0/1", "b-in-ns-c/a"))
+	require.NoError(t, iMgr.AddToSets([]*IPSetMetadata{second}, "128.0.0.0/1", "b-in-ns-c/a"))
+	require.NoError(t, iMgr.AddReference(second, "b-in-ns-c/a", NetPolType))
+
+	firstSet := iMgr.GetIPSet(first.GetPrefixName())
+	secondSet := iMgr.GetIPSet(second.GetPrefixName())
+	require.NotNil(t, firstSet)
+	require.NotNil(t, secondSet)
+
+	// Each set holds only its own members; neither carries the other's.
+	require.Equal(t, map[string]string{"198.51.100.10": "c/a-in-ns-b"}, firstSet.IPPodKey)
+	require.Len(t, secondSet.IPPodKey, 2)
+	require.NotContains(t, secondSet.IPPodKey, "198.51.100.10")
+	require.NotContains(t, firstSet.IPPodKey, "0.0.0.0/1")
+
+	// Each set is owned only by its own netpol.
+	require.Equal(t, map[string]struct{}{"c/a-in-ns-b": {}}, firstSet.NetPolReference)
+	require.Equal(t, map[string]struct{}{"b-in-ns-c/a": {}}, secondSet.NetPolReference)
+}
+
+// TestGetHashedNameDistinctForReportedPair verifies the two prefixed names that previously
+// shared a kernel name now resolve to distinct kernel names, so their members can never be
+// combined.
+func TestGetHashedNameDistinctForReportedPair(t *testing.T) {
+	nsSet := NewIPSetMetadata("msobb-target", Namespace)            // prefixed "ns-msobb-target"
+	podLabelSet := NewIPSetMetadata("x:YMaaIZ", KeyValueLabelOfPod) // prefixed "podlabel-x:YMaaIZ"
+	require.NotEqual(t, nsSet.GetHashedName(), podLabelSet.GetHashedName(),
+		"distinct ipset names must resolve to distinct kernel names")
+}
+
+// TestClaimKernelNameSingleOwner verifies the defense-in-depth invariant: a kernel name is
+// owned by a single prefixed name; the owner (and re-claims) are accepted, a different name
+// is rejected, and the name is released on delete.
+func TestClaimKernelNameSingleOwner(t *testing.T) {
+	metrics.ReinitializeAll()
+	iMgr := NewIPSetManager(applyAlwaysCfg, common.NewMockIOShim(nil))
+
+	const kernelName = "azure-npm-sharedkernelname00"
+	require.NoError(t, iMgr.claimKernelName("ns-a", kernelName))     // first owner
+	require.NoError(t, iMgr.claimKernelName("ns-a", kernelName))     // same owner re-claims (idempotent)
+	require.Error(t, iMgr.claimKernelName("podlabel-b", kernelName)) // different owner rejected
+
+	delete(iMgr.kernelNameOwner, kernelName)
+	require.NoError(t, iMgr.claimKernelName("podlabel-b", kernelName)) // free after release
+}
+
+// TestCreateIPSetKernelNameFreedOnDelete verifies DeleteIPSet releases a set's kernel name so
+// the same set can be recreated afterwards.
+func TestCreateIPSetKernelNameFreedOnDelete(t *testing.T) {
+	metrics.ReinitializeAll()
+	iMgr := NewIPSetManager(applyAlwaysCfg, common.NewMockIOShim(nil))
+
+	set := NewIPSetMetadata("msobb-target", Namespace)
+	iMgr.CreateIPSets([]*IPSetMetadata{set})
+	require.NotNil(t, iMgr.GetIPSet(set.GetPrefixName()))
+	_, owned := iMgr.kernelNameOwner[set.GetHashedName()]
+	require.True(t, owned)
+
+	iMgr.DeleteIPSet(set.GetPrefixName(), util.SoftDelete)
+	require.Nil(t, iMgr.GetIPSet(set.GetPrefixName()))
+	_, owned = iMgr.kernelNameOwner[set.GetHashedName()]
+	require.False(t, owned, "kernel name must be released on delete")
+}
+
 func TestReconcileCache(t *testing.T) {
 	type args struct {
 		cfg          *IPSetManagerCfg
