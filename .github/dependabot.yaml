@@ -2,7 +2,10 @@
 version: 2
 updates:
   - package-ecosystem: "docker"
-    directory: "/"
+    directories:
+      - "**/*"
+    exclude-paths:
+      - "**/*.tmpl"
     schedule:
       interval: "daily"
     commit-message:
