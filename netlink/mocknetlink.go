@@ -24,6 +24,7 @@ type MockNetlink struct {
 	addRouteFn               routeValidateFn
 	DeleteLinkFn             func(name string) error
 	SetOrRemoveLinkAddressFn func(linkInfo LinkInfo, mode, flags int) error
+	SetLinkNetNsByIndexFn    func(index int, fd uintptr) error
 }
 
 func NewMockNetlink(returnError bool, errorString string) *MockNetlink {
@@ -80,6 +81,13 @@ func (f *MockNetlink) SetLinkMaster(string, string) error {
 }
 
 func (f *MockNetlink) SetLinkNetNs(string, uintptr) error {
+	return f.error()
+}
+
+func (f *MockNetlink) SetLinkNetNsByIndex(index int, fd uintptr) error {
+	if f.SetLinkNetNsByIndexFn != nil {
+		return f.SetLinkNetNsByIndexFn(index, fd)
+	}
 	return f.error()
 }
 

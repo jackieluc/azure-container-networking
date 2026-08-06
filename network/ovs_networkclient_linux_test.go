@@ -1,7 +1,6 @@
 package network
 
 import (
-	"os"
 	"testing"
 
 	"github.com/Azure/azure-container-networking/netlink"
@@ -13,10 +12,6 @@ const (
 	bridgeName = "testbridge"
 	hostIntf   = "testintf"
 )
-
-func TestMain(m *testing.M) {
-	os.Exit(m.Run())
-}
 
 func TestAddRoutes(t *testing.T) {
 	ovsctlClient := ovsctl.NewMockOvsctl(false, "", "")

@@ -131,6 +131,7 @@ type NnsClient interface {
 type InterfaceGetter interface {
 	GetNetworkInterfaces() ([]net.Interface, error)
 	GetNetworkInterfaceAddrs(iface *net.Interface) ([]net.Addr, error)
+	ResolveMasterInterface(iface *net.Interface) (*net.Interface, error)
 }
 
 // snatConfiguration contains a bool that determines whether CNI enables snat on host and snat for dns
@@ -247,7 +248,9 @@ func (plugin *NetPlugin) findInterfaceByMAC(macAddress string) string {
 		if mac != macAddress {
 			continue
 		}
-		ifName, err := resolveMasterInterface(iface.Name)
+		// Copy the loop variable before taking its address so we never alias it.
+		matched := iface
+		master, err := plugin.netClient.ResolveMasterInterface(&matched)
 		if err != nil {
 			logger.Error("failed to resolve master interface",
 				zap.String("name", iface.Name),
@@ -256,10 +259,12 @@ func (plugin *NetPlugin) findInterfaceByMAC(macAddress string) string {
 			return ""
 		}
 		logger.Info("found master interface by MAC",
-			zap.String("resolved-master", ifName),
+			zap.String("resolved-master", master.Name),
+			zap.Int("resolved-master-index", master.Index),
 			zap.String("interface", iface.Name),
+			zap.Int("interface-index", iface.Index),
 			zap.String("mac", macAddress))
-		return ifName
+		return master.Name
 	}
 	logger.Error("failed to find interface by MAC", zap.String("macAddress", macAddress), zap.Strings("macs", macs))
 	return ""
@@ -696,7 +701,6 @@ func sortInfraNICFirst(epInfos []*network.EndpointInfo) {
 		return 0
 	})
 }
-
 
 func (plugin *NetPlugin) findMasterInterface(opt *createEpInfoOpt) string {
 	switch opt.ifInfo.NICType {
