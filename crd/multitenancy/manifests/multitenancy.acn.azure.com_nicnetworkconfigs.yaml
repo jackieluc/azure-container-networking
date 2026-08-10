@@ -127,12 +127,12 @@ spec:
                 description: AccelnetEnabled determines if the CNI will provision
                   the NIC with accelerated networking enabled
                 type: boolean
-              availableIPs:
-                description: AvailableIPs tracks the available IP addresses in this
-                  NC block
-                items:
-                  type: string
-                type: array
+              consumableCapacity:
+                description: |-
+                  ConsumableCapacity indicates the number of pods that can share this NIC.
+                  Total number of pods.
+                minimum: 0
+                type: integer
               cooldownExpiresAt:
                 description: |-
                   CooldownExpiresAt is the time at which the cooldown period ends. It is set only while Status is
@@ -186,6 +186,12 @@ spec:
                 description: PrimaryIP is the primary IP allocated to the network
                   container
                 type: string
+              reservedIPs:
+                description: ReservedIPs tracks the list of IP addresses that are
+                  reserved for this NIC
+                items:
+                  type: string
+                type: array
               status:
                 description: Status indicates the current status of the NIC Network
                   Config

@@ -109,9 +109,9 @@ type NICNetworkConfigStatus struct {
 	// SubnetAddressSpace is the subnet address space of the injected subnet
 	// +kubebuilder:validation:Optional
 	SubnetAddressSpace string `json:"subnetAddressSpace,omitempty"`
-	// AvailableIPs tracks the available IP addresses in this NC block
+	// ReservedIPs tracks the list of IP addresses that are reserved for this NIC
 	// +kubebuilder:validation:Optional
-	AvailableIPs []string `json:"availableIPs,omitempty"`
+	ReservedIPs []string `json:"reservedIPs,omitempty"`
 	// PodAllocations tracks the allocated IP addresses to pod mapping.
 	// +kubebuilder:validation:Optional
 	PodAllocations map[string]PodAllocation `json:"podAllocations,omitempty"`
@@ -124,6 +124,11 @@ type NICNetworkConfigStatus struct {
 	// AccelnetEnabled determines if the CNI will provision the NIC with accelerated networking enabled
 	// +kubebuilder:validation:Optional
 	AccelnetEnabled bool `json:"accelnetEnabled,omitempty"`
+	// ConsumableCapacity indicates the number of pods that can share this NIC.
+	// Total number of pods.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Optional
+	ConsumableCapacity int `json:"consumableCapacity,omitempty"`
 }
 
 // NICNCStatus indicates the status of NIC Network Config
