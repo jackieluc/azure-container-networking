@@ -91,14 +91,34 @@ delegate_subnet() {
     local subnet_id
     subnet_id=$(az network vnet subnet show -g "$RG" --vnet-name "$vnet" -n "$subnet" --query id -o tsv)
 
-    # Check if SAL already exists — skip expensive delegation if so
-    local sal
-    sal=$(az rest --method get \
-      --url "${subnet_id}?api-version=2024-05-01" \
-      2>/dev/null | jq -r '.properties.serviceAssociationLinks[0].name // empty')
-    if [[ -n "$sal" ]]; then
-      echo "SAL already exists on $subnet in $vnet (name: $sal). Skipping delegation."
-      return 0
+    # The delegation GUID lives at serviceAssociationLinks[0].properties.subnetId,
+    # which `az network vnet subnet show` does not project. Do not simplify this
+    # back to that command: the GUID would read empty for every subnet, the check
+    # below would never skip, and every run would re-delegate the entire fleet.
+    # Keep the URL relative too - a full https://management.azure.com/... form
+    # fails to derive an auth resource unless --resource is also passed.
+    local subnet_json rc=0
+    subnet_json=$(az rest --method get --url "${subnet_id}?api-version=2024-05-01" 2>/dev/null) || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        # Assume delegated when the subnet cannot be read. A spurious re-delegation
+        # is not recoverable here - the link is created with allowDelete: false, so
+        # ARM cannot remove it - whereas skipping is self-correcting, since the next
+        # run re-evaluates and delegates if the GUID is genuinely absent.
+        echo "[WARN] Could not read subnet $subnet in $vnet (az rest exit $rc); skipping delegation." >&2
+        return 0
+    fi
+
+    # Gate on the delegation GUID rather than on the link's mere presence. The GUID
+    # is what everything downstream actually consumes - GetSubnetGUID in
+    # test/integration/swiftv2/helpers/az_helpers.go reads this same field to
+    # populate the PodNetwork CR's subnetGUID. A service association link can be
+    # present by name without carrying one, and skipping on the name alone would
+    # leave that subnet permanently undelegated for the tests.
+    local delegation_guid
+    delegation_guid=$(jq -r '.properties.serviceAssociationLinks[0].properties.subnetId // empty' <<<"$subnet_json")
+    if [[ -n "$delegation_guid" ]]; then
+        echo "Subnet $subnet in $vnet is already delegated (GUID: $delegation_guid). Skipping delegation."
+        return 0
     fi
 
     echo "Delegating subnet: $subnet in VNet: $vnet to Subnet Delegator"

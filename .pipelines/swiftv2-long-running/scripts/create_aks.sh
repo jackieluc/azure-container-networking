@@ -14,6 +14,7 @@ DELEGATOR_BASE_URL=${9:-"http://localhost:8080"}
 CLUSTER_COUNT=2
 PODS_PER_NODE=7
 CLUSTER_PREFIX="aks"
+STALE_NODE_THRESHOLD=1800  # seconds a Node may stay unreachable and non-Ready before it is considered unrecoverable
 
 echo "Setting active subscription to $SUBSCRIPTION_ID"
 az account set --subscription "$SUBSCRIPTION_ID"
@@ -75,6 +76,41 @@ wait_for_provisioning() {
   return 1
 }
 
+# "kubectl wait --all" can never be satisfied by a Node whose kubelet has stopped
+# reporting, so it burns its full timeout and then fails without saying why. Report
+# those nodes up front and fail immediately: a node unreachable this long needs its
+# backing VM repaired, and no amount of waiting will change that.
+#
+# Deliberately NOT deleting these Node objects. A stale Node usually means the VM
+# behind it is deallocated or its scale set failed to provision, so removing the
+# object would let the readiness gate pass while the cluster is silently short of
+# nodes. Fail loudly and let the VM be repaired instead.
+check_unreachable_nodes() {
+  local kubeconfig="$1" clusterName="$2"
+  local now unreachable
+
+  now=$(date -u +%s)
+  unreachable=$(kubectl --kubeconfig "$kubeconfig" get nodes -o json \
+    | jq -r --argjson now "$now" --argjson threshold "$STALE_NODE_THRESHOLD" '
+        .items[]
+        | select(.spec.taints // [] | any(.key == "node.kubernetes.io/unreachable"))
+        | .metadata.name as $name
+        | .status.conditions[]
+        | select(.type == "Ready")
+        | select(.status != "True" and (.lastTransitionTime | fromdateiso8601) < ($now - $threshold))
+        | "  - \($name) (Ready=\(.status) since \(.lastTransitionTime))"')
+
+  if [[ -z "$unreachable" ]]; then
+    return 0
+  fi
+
+  echo "##vso[task.logissue type=error]Cluster $clusterName has nodes that have been unreachable and non-Ready for more than ${STALE_NODE_THRESHOLD}s:"
+  echo "$unreachable"
+  echo "They cannot become Ready, so waiting for node readiness would only time out."
+  echo "Check the backing scale sets for a failed provisioningState or missing instances, repair them, then re-run."
+  return 1
+}
+
 for i in $(seq 1 "$CLUSTER_COUNT"); do
     echo "Creating cluster #$i..."
 
@@ -115,6 +151,8 @@ for i in $(seq 1 "$CLUSTER_COUNT"); do
     az aks get-credentials -g "$RG" -n "$CLUSTER_NAME" --admin --overwrite-existing \
       --file "/tmp/${CLUSTER_NAME}.kubeconfig"
     
+    check_unreachable_nodes "/tmp/${CLUSTER_NAME}.kubeconfig" "$CLUSTER_NAME"
+
     echo "Waiting for all nodes in $CLUSTER_NAME to be Ready..."
     kubectl --kubeconfig "/tmp/${CLUSTER_NAME}.kubeconfig" wait --for=condition=Ready nodes --all --timeout=10m
 done
