@@ -2,7 +2,7 @@ ARG ARCH
 
 
 # intermediate for win-ltsc2022
-FROM --platform=windows/${ARCH} mcr.microsoft.com/windows/servercore:ltsc2022@sha256:45952938708fbde6ec0b5b94de68bcdec3f8c838be018536b1e9e5bd95e6b943 as windows
+FROM --platform=windows/${ARCH} mcr.microsoft.com/windows/servercore:ltsc2022@sha256:3a2a2fdfbae2f720f6fe26f2d7680146712ce330f605b02a61d624889735c72e as windows
 ARG ARTIFACT_DIR
 
 COPY ${ARTIFACT_DIR}/files/kubeconfigtemplate.yaml kubeconfigtemplate.yaml
@@ -10,7 +10,7 @@ COPY ${ARTIFACT_DIR}/scripts/setkubeconfigpath.ps1 setkubeconfigpath.ps1
 COPY ${ARTIFACT_DIR}/scripts/setkubeconfigpath-capz.ps1 setkubeconfigpath-capz.ps1
 COPY ${ARTIFACT_DIR}/bin/azure-npm.exe npm.exe
 
-CMD ["npm.exe", "start" "--kubeconfig=.\\kubeconfig"]
+CMD ["npm.exe", "start", "--kubeconfig=.\\kubeconfig"]
 
 
 FROM --platform=linux/${ARCH} mcr.microsoft.com/mirror/docker/library/ubuntu:24.04 as linux
