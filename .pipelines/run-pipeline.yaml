@@ -207,6 +207,23 @@ stages:
 
 
 - ${{ if not(contains(variables['Build.SourceBranch'], 'refs/pull')) }}:
+  - stage: release
+    displayName: "Release Drop"
+    dependsOn:
+    - setup
+    variables:
+      # The Makefile derives every version from `git describe`, but the source
+      # artifact carries no git history. Seed them from the setup stage instead.
+      ACN_VERSION: $[ stageDependencies.setup.env.outputs['EnvironmentalVariables.Tag'] ]
+      AZURE_IPAM_VERSION: $[ stageDependencies.setup.env.outputs['EnvironmentalVariables.azureIpamVersion'] ]
+      AZURE_IP_MASQ_MERGER_VERSION: $[ stageDependencies.setup.env.outputs['EnvironmentalVariables.azureIpMasqMergerVersion'] ]
+      AZURE_IPTABLES_MONITOR_VERSION: $[ stageDependencies.setup.env.outputs['EnvironmentalVariables.azureIptablesMonitorVersion'] ]
+      AZURE_BLOCK_IPTABLES_VERSION: $[ stageDependencies.setup.env.outputs['EnvironmentalVariables.azureBlockIptablesVersion'] ]
+      CILIUM_LOG_COLLECTOR_VERSION: $[ stageDependencies.setup.env.outputs['EnvironmentalVariables.ciliumLogCollectorVersion'] ]
+      IPV6_HP_BPF_VERSION: $[ stageDependencies.setup.env.outputs['EnvironmentalVariables.ipv6HpBpfVersion'] ]
+    jobs:
+    - template: /.pipelines/build/release-drop.jobs.yaml
+
   - stage: manifests
     displayName: "Image Manifests"
     dependsOn:
