@@ -1,0 +1,162 @@
+# ----------------------------------------------------------------------------
+# failure-agent-teams-bot — Weekly trends digest
+#
+# Scheduled weekly pipeline that aggregates the failure-analysis artifacts from
+# the last N days of E2E runs, has the failure-agent (Azure OpenAI) synthesize a
+# trends digest, and posts one Adaptive Card to the shared ACN Pipeline Notifier
+# bot. Unlike the per-run incident card, this weekly card @mentions the
+# failure-analysis owners (see scripts/notify-weekly.sh).
+#
+# BEFORE THIS RUNS you MUST fill in:
+#   1. pipeline-constants.yml → notifyTeamId, notifyChannelId
+#   2. parameters.analysisPipelineIds → defaults to 95007 (ACN E2E, msazure/One);
+#      add more comma-separated ADO build-definition ids to aggregate additional
+#      pipelines' failureAnalysis_* artifacts.
+#   3. The AzureCLI@2 azureSubscription below → your WIF service connection.
+#   4. Enable "Allow scripts to access the OAuth token" so SYSTEM_ACCESSTOKEN is
+#      available for the artifact-aggregation REST calls.
+#   5. Azure OpenAI variables (AZURE_OPENAI_*) available to the analysis step.
+#
+# Requirements on the agent: Go, Azure CLI, jq, curl, unzip.
+# ----------------------------------------------------------------------------
+
+pr: none
+trigger: none
+
+schedules:
+  - cron: "0 15 * * 1"           # Mondays 15:00 UTC
+    displayName: "Weekly FAA trends digest"
+    branches:
+      include:
+        - master
+    always: true
+
+parameters:
+  # ADO build-definition id(s) whose failureAnalysis_* artifacts are aggregated.
+  # Comma-separated. Empty = the aggregation step is a quiet no-op.
+  # 95007 = ACN E2E (msazure/One) — the pipeline that publishes failureAnalysis_* artifacts.
+  - name: analysisPipelineIds
+    type: string
+    default: "95007"
+  - name: windowDays
+    type: string
+    default: "7"
+  # WIF/Azure service connection used to post the weekly card. Exposed as a
+  # parameter so it can be changed at queue time without editing this file.
+  - name: serviceConnection
+    type: string
+    default: acn-dalec-test
+
+variables:
+  - template: pipeline-constants.yml
+
+stages:
+  - stage: weekly
+    displayName: "Weekly FAA trends"
+    jobs:
+      - job: digest
+        displayName: "Aggregate + synthesize + notify"
+        pool:
+          name: "$(BUILD_POOL_NAME_DEFAULT)"
+        variables:
+          - name: weeklyEvidence
+            value: $(Agent.TempDirectory)/weekly-evidence
+          - name: weeklyOutput
+            value: $(Agent.TempDirectory)/weekly-out
+          # OAuth token needed by both the artifact-collection REST calls and the
+          # notifier reply; defined once at the job level rather than per step.
+          - name: SYSTEM_ACCESSTOKEN
+            value: $(System.AccessToken)
+        steps:
+          # Install the Go version declared by tools/failure-agent/go.mod instead
+          # of pinning it here, so this pipeline tracks the tool's own toolchain.
+          - script: |
+              set -euo pipefail
+              cd "$(Build.SourcesDirectory)/tools/failure-agent"
+              GO_VER=$(grep '^toolchain' go.mod | sed 's/toolchain go//' | cut -d. -f1,2)
+              if [ -z "$GO_VER" ]; then GO_VER=$(grep '^go ' go.mod | awk '{print $2}' | cut -d. -f1,2); fi
+              if [ -z "$GO_VER" ]; then echo "##[error]Failed to detect Go version from go.mod"; exit 1; fi
+              echo "##vso[task.setvariable variable=GO_TOOLCHAIN_VERSION]$GO_VER"
+              echo "Detected Go version: $GO_VER"
+            displayName: "Detect Go version from go.mod"
+
+          - task: GoTool@0
+            displayName: "Setup Go"
+            inputs:
+              version: '$(GO_TOOLCHAIN_VERSION)'
+
+          # --- Aggregate the week's failure-analysis artifacts ----------------
+          - bash: |
+              set -euo pipefail
+              mkdir -p "$(weeklyEvidence)"
+              bash "$(Build.SourcesDirectory)/.pipelines/failure-agent-teams-bot/scripts/collect-week-artifacts.sh" \
+                "$(weeklyEvidence)" \
+                "${{ parameters.windowDays }}" \
+                "${{ parameters.analysisPipelineIds }}"
+            displayName: "Collect week's analysis artifacts"
+            env:
+              SYSTEM_COLLECTIONURI: $(System.CollectionUri)
+              SYSTEM_TEAMPROJECT: $(System.TeamProject)
+
+          # --- Synthesize the weekly trends digest ----------------------------
+          - script: |
+              set -euo pipefail
+              mkdir -p "$(weeklyOutput)"
+              if [ -z "${AZURE_OPENAI_ENDPOINT:-}" ] || [ -z "${AZURE_OPENAI_DEPLOYMENT:-}" ]; then
+                echo "##[warning]Azure OpenAI credentials not configured; the weekly digest will fall back to a deterministic stats-only summary."
+              fi
+              cd "$(Build.SourcesDirectory)/tools/failure-agent"
+              go run . \
+                --weekly-report "$(weeklyEvidence)" \
+                --output "$(weeklyOutput)" \
+                --weekly-window-days "${{ parameters.windowDays }}"
+            displayName: "Synthesize weekly trends"
+            env:
+              AZURE_OPENAI_ENDPOINT: $(AZURE_OPENAI_ENDPOINT)
+              AZURE_OPENAI_DEPLOYMENT: $(AZURE_OPENAI_DEPLOYMENT)
+              AZURE_OPENAI_API_KEY: $(AZURE_OPENAI_API_KEY)
+              AZURE_OPENAI_API_VERSION: $(AZURE_OPENAI_API_VERSION)
+
+          # Attach weekly-report.md to this run's Summary tab (Extensions/Summary)
+          # via the task.uploadsummary logging command — this is the publish action.
+          # Also flag that a digest exists so the artifact-publish step below skips
+          # cleanly on an empty run.
+          - script: |
+              set -euo pipefail
+              REPORT="$(weeklyOutput)/weekly-report.md"
+              if [ -f "$REPORT" ]; then
+                echo "##vso[task.uploadsummary]$REPORT"
+                echo "##vso[task.setvariable variable=weeklyReportExists]true"
+              fi
+            displayName: "Upload weekly summary to run"
+            condition: succeededOrFailed()
+
+          # Publish the full weekly output (weekly-report.md + weekly-incident.json)
+          # as a downloadable build artifact for traceability of what was
+          # synthesized and posted to Teams. Skipped cleanly when no digest exists.
+          - task: PublishPipelineArtifact@1
+            displayName: "Publish weekly trends artifact"
+            condition: and(succeededOrFailed(), eq(variables['weeklyReportExists'], 'true'))
+            inputs:
+              targetPath: $(weeklyOutput)
+              artifact: weekly-trends
+
+          # --- Post the weekly card (mentions the FAA owners) -----------------
+          - task: AzureCLI@2
+            displayName: "Notify Teams — weekly trends"
+            condition: succeededOrFailed()
+            inputs:
+              azureSubscription: ${{ parameters.serviceConnection }}
+              scriptType: bash
+              scriptLocation: inlineScript
+              addSpnToEnvironment: true
+              inlineScript: |
+                bash "$(Build.SourcesDirectory)/.pipelines/failure-agent-teams-bot/scripts/notify-weekly.sh" \
+                  "$(weeklyOutput)/weekly-incident.json"
+            env:
+              NOTIFIER_ENDPOINT: $(notifierEndpoint)
+              NOTIFIER_API_AUDIENCE: $(notifierApiAudience)
+              NOTIFY_SOURCE: $(notifySource)-weekly
+              NOTIFY_RUN_ID: $(Build.BuildId)
+              NOTIFY_TEAM_ID: $(notifyTeamId)
+              NOTIFY_CHANNEL_ID: $(notifyChannelId)
