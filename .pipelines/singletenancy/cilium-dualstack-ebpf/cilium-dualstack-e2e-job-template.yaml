@@ -1,4 +1,5 @@
 parameters:
+  testBundle: full
   use1ESPublishTask: false
   name: ""
   displayName: ""
@@ -12,7 +13,10 @@ parameters:
 stages:
   - stage: ${{ parameters.clusterName }}
     displayName: Create Cluster - ${{ parameters.displayName }}
-    condition: and(succeeded(), eq(dependencies.setup.outputs['env.GitDiffCheck.RunCiliumTests'], 'true'))
+    ${{ if ne(parameters.testBundle, 'full') }}:
+      condition: and(succeeded(), eq(dependencies.setup.outputs['env.ImageBundle.run_${{ parameters.name }}'], 'true'))
+    ${{ else }}:
+      condition: and(succeeded(), eq(dependencies.setup.outputs['env.GitDiffCheck.RunCiliumTests'], 'true'))
     dependsOn:
       - ${{ parameters.dependsOn }}
       - setup
@@ -33,6 +37,7 @@ stages:
       AZURE_IPTABLES_MONITOR_IMAGE_OVERRIDE: $[ stageDependencies.setup.env.outputs['EnvironmentalVariables.azureIptablesMonitorImageOverride'] ]
       AZURE_IP_MASQ_MERGER_IMAGE_OVERRIDE: $[ stageDependencies.setup.env.outputs['EnvironmentalVariables.azureIpMasqMergerImageOverride'] ]
       CILIUM_LOG_COLLECTOR_IMAGE_OVERRIDE: $[ stageDependencies.setup.env.outputs['EnvironmentalVariables.ciliumLogCollectorImageOverride'] ]
+      IPV6_HP_BPF_IMAGE_OVERRIDE: $[ stageDependencies.setup.env.outputs['EnvironmentalVariables.ipv6HpBpfImageOverride'] ]
       IPV6_IMAGE_REGISTRY: acnpublic.azurecr.io
     jobs:
       - job: ${{ parameters.name }}
@@ -56,7 +61,10 @@ stages:
               installFlag: INSTALL_OVERLAY
   - stage: ${{ parameters.name }}
     displayName: E2E - ${{ parameters.displayName }}
-    condition: and(succeeded(), eq(dependencies.setup.outputs['env.GitDiffCheck.RunCiliumTests'], 'true'))
+    ${{ if ne(parameters.testBundle, 'full') }}:
+      condition: and(succeeded(), eq(dependencies.setup.outputs['env.ImageBundle.run_${{ parameters.name }}'], 'true'))
+    ${{ else }}:
+      condition: and(succeeded(), eq(dependencies.setup.outputs['env.GitDiffCheck.RunCiliumTests'], 'true'))
     dependsOn:
     - setup
     - publish
